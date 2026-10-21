@@ -36,7 +36,7 @@ const app=initializeApp({apiKey:"AIzaSyBIiaApdrz_aSymdznKpFAWUiAE-g--4bw",authDo
 const auth=getAuth(app),db=getFirestore(app),W=window,$=i=>document.getElementById(i);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const m=n=>(+n||0).toFixed(2),fd=t=>new Date(t).toLocaleDateString('en-IN');
-let D={spares:[],bills:[],purchases:[],expenses:[],suppliers:[],payments:[]},pg='bill',dirty=0,B={items:[]},PB={items:[]},ES=null,subd=0;
+let D={spares:[],bills:[],purchases:[],expenses:[],suppliers:[],payments:[]},pg='bill',dirty=0,B={items:[]},PB={items:[]},ES=null,ESid=null,subd=0;
 let S={n:'MS Mobile Service Centre',a:'Sathik Basha Nagar, Chikkanna College Road, Tirupur - 2',p:'93615 99748',g:'',logo:''};
 const NAV=[['bill','Billing'],['spares','Spare parts'],['buy','Purchases'],['sup','Suppliers'],['exp','Expenses'],['cus','Customers'],['rep','Reports'],['set','Settings']];
 const run=async f=>{try{await f()}catch(e){alert(e.message)}};
@@ -54,15 +54,20 @@ const dl=(id,a)=>`<datalist id="${id}">${a.map(x=>`<option value="${esc(x)}">`).
 const spl=()=>dl('spl',D.spares.map(s=>s.id+' - '+s.n));
 const find=v=>D.spares.find(x=>v.startsWith(x.id+' - '));
 // ---- billing
-const BF=['cn','cp','dv','gst','dis','pay'];
+const BF=['cn','cp','dv','bd','gst','dis','pay'];
+const td=()=>{const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
+const bts=()=>!B.bd||B.bd==td()?Date.now():new Date(B.bd+'T12:00').getTime();
 const keep=()=>BF.forEach(k=>{if($(k))B[k]=$(k).value});
-function tt(){keep();const s=B.items.reduce((a,i)=>a+i.q*i.p,0),d=Math.min(+B.dis||0,s),g=(s-d)*(+B.gst||0)/100,t=s-d+g;if($('tt'))$('tt').textContent=`Subtotal ${m(s)} | GST ${m(g)} | Total ₹${m(t)}`;return{s,d,g,t}}
+const calc=()=>{const s=B.items.reduce((a,i)=>a+i.q*i.p,0),c=B.items.reduce((a,i)=>a+i.q*(i.c||0),0),d=Math.min(+B.dis||0,s),g=(s-d)*(+B.gst||0)/100,t=s-d+g;return{s,c,d,g,t,pf:s-d-c}};
+const ttx=x=>`Subtotal ${m(x.s)} | GST ${m(x.g)} | Total ₹${m(x.t)}<br><span class="mu ${x.pf<0?'red':''}">Our cost ${m(x.c)} | Profit ${m(x.pf)} (only you see this, never printed)</span>`;
+function tt(){keep();const x=calc();if($('tt'))$('tt').innerHTML=ttx(x);return x}
 W.tt=tt;
-W.al=()=>{keep();const v=val('li').trim(),q=+val('lq')||1;let p=val('lp');if(!v)return;const s=find(v);
-if(s){if(s.stock<q&&!confirm('Only '+s.stock+' in stock. Add anyway?'))return;B.items.push({id:s.id,n:s.n,q,p:p===''?+s.p:+p,c:+s.c||0})}else B.items.push({n:v,q,p:+p||0,c:0});dirty=1;render()};
+W.al=()=>{keep();const v=val('li').trim(),q=+val('lq')||1;let p=val('lp'),c=val('lc');if(!v)return;const s=find(v);
+if(s){if(s.stock<q&&!confirm('Only '+s.stock+' in stock. Add anyway?'))return;B.items.push({id:s.id,n:s.n,q,p:p===''?+s.p:+p,c:c===''?+s.c||0:+c})}else B.items.push({n:v,q,p:+p||0,c:+c||0});dirty=1;render()};
+W.pf=()=>{const s=find(val('li'));$('lp').placeholder=s?m(s.p):'';$('lc').placeholder=s?m(s.c):''};
 W.rl=i=>{keep();B.items.splice(i,1);dirty=1;render()};
 W.sb=()=>run(async()=>{const t=tt();if(!B.items.length)return alert('Add items first.');const no=Math.max(1000,...D.bills.map(b=>b.no||0))+1;
-const b={no,ts:Date.now(),cn:B.cn||'Walk-in',cp:B.cp||'',dv:B.dv||'',items:B.items,s:t.s,d:t.d,g:t.g,gp:+B.gst||0,t:t.t,pay:B.pay||'Cash'};
+const b={no,ts:bts(),cn:B.cn||'Walk-in',cp:B.cp||'',dv:B.dv||'',items:B.items,s:t.s,d:t.d,g:t.g,gp:+B.gst||0,t:t.t,pay:B.pay||'Cash'};
 const w=writeBatch(db);w.set(doc(collection(db,'bills')),b);B.items.forEach(i=>{if(i.id)w.update(doc(db,'spares',i.id),{stock:increment(-i.q)})});await w.commit();B={items:[]};dirty=0;render();pbill(b)});
 function pbill(b){$('pb').innerHTML=`<div style="text-align:center">${S.logo?`<img src="${S.logo}" style="max-height:70px"><br>`:''}<h2 style="margin:4px">${esc(S.n)}</h2>${esc(S.a)}<br>Phone: ${esc(S.p)}${S.g?' | GSTIN: '+esc(S.g):''}</div><hr>
 <b>Bill #${b.no}</b> &nbsp; ${fd(b.ts)}<br>Customer: ${esc(b.cn)} ${esc(b.cp)}${b.dv?'<br>Device: '+esc(b.dv):''}
@@ -71,12 +76,12 @@ function pbill(b){$('pb').innerHTML=`<div style="text-align:center">${S.logo?`<i
 W.vb=n=>pbill(D.bills.find(b=>b.no==n));
 // ---- pages
 const P={
-bill(){const t=B.items.reduce((a,i)=>a+i.q*i.p,0);return spl()+`<div class=c><h3>Customer</h3><div class=r><div><label>Name</label><input id=cn value="${esc(B.cn)}"></div><div><label>Phone</label><input id=cp inputmode=tel value="${esc(B.cp)}"></div><div><label>Device</label><input id=dv value="${esc(B.dv)}"></div></div></div>
-<div class=c><h3>Items</h3><div class=r><div style="flex:3"><label>Spare (code or name) or service</label><input id=li list=spl></div><div><label>Qty</label><input id=lq type=number value=1></div><div><label>Price</label><input id=lp type=number></div></div><button class=b onclick="al()">Add item</button>
-<div class=tw><table>${B.items.map((i,x)=>`<tr><td>${esc(i.n)}</td><td>${i.q} × ${m(i.p)}</td><td class=n>${m(i.q*i.p)}</td><td><button class="b s" onclick="rl(${x})">x</button></td></tr>`).join('')}</table></div>
+bill(){const t=B.items.reduce((a,i)=>a+i.q*i.p,0);return spl()+`<div class=c><h3>Customer</h3><div class=r><div><label>Name</label><input id=cn value="${esc(B.cn)}"></div><div><label>Phone</label><input id=cp inputmode=tel value="${esc(B.cp)}"></div><div><label>Device</label><input id=dv value="${esc(B.dv)}"></div><div><label>Bill date (past or future OK)</label><input id=bd type=date value="${B.bd||td()}"></div></div></div>
+<div class=c><h3>Items</h3><div class=r><div style="flex:3"><label>Spare (code or name) or service</label><input id=li list=spl oninput="pf()"></div><div><label>Qty</label><input id=lq type=number value=1></div><div><label>Our cost ₹ (not on bill)</label><input id=lc type=number></div><div><label>Selling price ₹ (we got)</label><input id=lp type=number></div></div><button class=b onclick="al()">Add item</button>
+<div class=tw><table>${B.items.map((i,x)=>`<tr><td>${esc(i.n)}</td><td>${i.q} × ${m(i.p)}</td><td class="mu ${i.p<i.c?'red':''}">cost ${m(i.c)} | profit ${m(i.q*(i.p-i.c))}</td><td class=n>${m(i.q*i.p)}</td><td><button class="b s" onclick="rl(${x})">x</button></td></tr>`).join('')}</table></div>
 <div class=r><div><label>GST %</label><input id=gst type=number value="${B.gst||0}" oninput="tt()"></div><div><label>Discount ₹</label><input id=dis type=number value="${B.dis||0}" oninput="tt()"></div><div><label>Payment</label><select id=pay>${['Cash','UPI','Card'].map(o=>`<option ${B.pay==o?'selected':''}>${o}</option>`).join('')}</select></div></div>
-<p id=tt><b>Total ₹${m(t)}</b></p><button class=b onclick="sb()">Save and print bill</button></div>`},
-spares(){const e=ES!==null?D.spares[ES]:{};return `<div class=c><h3>${ES!==null?'Edit':'Add'} spare part</h3><div class=r><div><label>Code (number)</label><input id=sc value="${esc(e.id)}" ${ES!==null?'readonly':''}></div><div style="flex:2"><label>Name</label><input id=sn value="${esc(e.n)}"></div></div>
+<p id=tt>${ttx(calc())}</p><button class=b onclick="sb()">Save and print bill</button></div>`},
+spares(){const e=ES!==null?D.spares[ES]:{};return `<div class=c><h3>${ES!==null?'Edit':'Add'} spare part</h3><div class=r><div><label>Code (number)</label><input id=sc value="${esc(e.id)}"></div><div style="flex:2"><label>Name</label><input id=sn value="${esc(e.n)}"></div></div>
 <div class=r><div><label>Buying cost</label><input id=sq type=number value="${e.c??''}"></div><div><label>Selling price</label><input id=sp type=number value="${e.p??''}"></div><div><label>Stock</label><input id=ss type=number value="${e.stock??0}"></div><div><label>Low stock alert at</label><input id=sm type=number value="${e.min??2}"></div></div><button class=b onclick="ssv()">Save spare</button></div>
 <div class="c tw"><table><tr><th>Code</th><th>Name</th><th>Cost</th><th>Price</th><th>Stock</th><th></th></tr>${D.spares.sort((a,b)=>a.id>b.id?1:-1).map((s,i)=>`<tr><td>${esc(s.id)}</td><td>${esc(s.n)}</td><td>${m(s.c)}</td><td>${m(s.p)}</td><td class="${s.stock<=s.min?'red':''}">${s.stock}</td><td><button class="b s" onclick="se(${i})">Edit</button></td></tr>`).join('')||'<tr><td>No spares yet. Add your first one above.</td></tr>'}</table></div>`},
 buy(){const t=PB.items.reduce((a,i)=>a+i.q*i.c,0);return spl()+dl('sul',D.suppliers.map(s=>s.id))+`<div class=c><h3>Buy spares from a supplier</h3><label>Supplier</label><input id=bs list=sul value="${esc(PB.sup)}"><div class=r><div style="flex:3"><label>Spare (pick from list)</label><input id=bi list=spl></div><div><label>Qty</label><input id=bq type=number value=1></div><div><label>Cost each</label><input id=bc type=number></div></div><button class=b onclick="pa()">Add</button>
@@ -89,7 +94,7 @@ exp(){const mo=ms(Date.now());return dl('el',['Rent','Salary','Electricity','Rec
 cus(){const g={};D.bills.forEach(b=>{const k=b.cp||b.cn;g[k]=g[k]||{n:b.cn,p:b.cp,v:0,t:0};g[k].v++;g[k].t+=b.t});
 return `<div class="c tw"><h3>Customers</h3><table><tr><th>Name</th><th>Phone</th><th>Visits</th><th>Total</th></tr>${Object.values(g).map(c=>`<tr><td>${esc(c.n)}</td><td>${esc(c.p)}</td><td>${c.v}</td><td>${m(c.t)}</td></tr>`).join('')}</table></div><div class=c><h3>Find a bill</h3><input placeholder="Name, phone or bill number" oninput="bf(this.value)"><div id=bl class=tw>${bl('')}</div></div>`},
 rep(){const n=Date.now(),a=(l,s)=>`<div><span class=mu>${l}</span><b>₹${m(s.pr)}</b><span class=mu>Sales ${m(s.rev)} | Parts ${m(s.cg)} | Expenses ${m(s.ex)}</span></div>`,w0=ws(n);let rows='';for(let i=0;i<8;i++){const f=w0-i*6048e5,s=sum(f,f+6048e5);rows+=`<tr><td>${fd(f)}</td><td>${s.n}</td><td class=n>${m(s.rev)}</td><td class=n>${m(s.pr)}</td></tr>`}
-const low=D.spares.filter(s=>s.stock<=s.min);return `<div class=k>${a('Profit today',sum(sd(n),sd(n)+864e5))}${a('Profit this week',sum(w0,w0+6048e5))}${a('Profit this month',sum(ms(n),9e15))}</div>
+const low=D.spares.filter(s=>s.stock<=s.min);return `<div class=k>${a('Profit today',sum(sd(n),sd(n)+864e5))}${a('Profit this week',sum(w0,w0+6048e5))}${a('Profit this month',sum(ms(n),new Date(new Date(n).getFullYear(),new Date(n).getMonth()+1,1).getTime()))}</div>
 <div class="c tw"><h3>Weekly revenue (profit = sales − cost of parts − expenses)</h3><table><tr><th>Week starting</th><th>Bills</th><th>Sales</th><th>Profit</th></tr>${rows}</table></div>
 <div class=c><h3>Low stock</h3>${low.map(s=>`${esc(s.id)} - ${esc(s.n)}: <b class=red>${s.stock}</b><br>`).join('')||'All spares are well stocked.'}</div>`},
 set(){return `<div class=c><h3>Shop details (shown on bills)</h3><label>Shop name</label><input id=an value="${esc(S.n)}"><label>Address</label><input id=aa value="${esc(S.a)}"><label>Phone</label><input id=ap value="${esc(S.p)}"><label>GST number (optional)</label><input id=ag value="${esc(S.g)}"><label>Logo</label><img id=lp2 src="${S.logo}" style="max-height:60px;display:block"><input type=file accept="image/*" onchange="lgo(this)"><button class=b onclick="sset()">Save details</button></div>
@@ -99,8 +104,10 @@ const sd=t=>{const d=new Date(t);d.setHours(0,0,0,0);return d.getTime()},ws=t=>{
 function sum(f,t){const bl=D.bills.filter(b=>b.ts>=f&&b.ts<t),rev=bl.reduce((a,b)=>a+b.t-b.g,0),cg=bl.reduce((a,b)=>a+b.items.reduce((x,i)=>x+i.q*(i.c||0),0),0),ex=D.expenses.filter(e=>e.ts>=f&&e.ts<t).reduce((a,e)=>a+e.a,0);return{rev,cg,ex,pr:rev-cg-ex,n:bl.length}}
 const bl=q=>{q=q.toLowerCase();return `<table>${D.bills.filter(b=>(b.cn+' '+b.cp+' '+b.no).toLowerCase().includes(q)).slice(0,30).map(b=>`<tr><td>#${b.no}</td><td>${fd(b.ts)}</td><td>${esc(b.cn)}</td><td class=n>${m(b.t)}</td><td><button class="b s" onclick="vb(${b.no})">Print</button></td></tr>`).join('')}</table>`};
 W.bf=q=>$('bl').innerHTML=bl(q);
-W.se=i=>{ES=i;render()};
-W.ssv=()=>run(async()=>{const id=val('sc').trim().replace(/[\/\s]/g,'_');if(!id||!val('sn'))return alert('Enter a code and a name.');await setDoc(doc(db,'spares',id),{n:val('sn'),c:+val('sq')||0,p:+val('sp')||0,stock:+val('ss')||0,min:+val('sm')||0},{merge:true});ES=null;render()});
+W.se=i=>{ES=i;ESid=D.spares[i].id;render()};
+W.ssv=()=>run(async()=>{const id=val('sc').trim().replace(/[\/\s]/g,'_');if(!id||!val('sn'))return alert('Enter a code and a name.');const data={n:val('sn'),c:+val('sq')||0,p:+val('sp')||0,stock:+val('ss')||0,min:+val('sm')||0};
+if(ES!==null&&ESid&&id!==ESid){if(D.spares.some(x=>x.id===id))return alert('Code '+id+' already exists. Pick a different code.');const w=writeBatch(db);w.set(doc(db,'spares',id),data);w.delete(doc(db,'spares',ESid));await w.commit()}
+else await setDoc(doc(db,'spares',id),data,{merge:true});ES=null;ESid=null;render()});
 W.pa=()=>{PB.sup=val('bs');const s=find(val('bi'));if(!s)return alert('Pick the spare from the list. Add new spares in Spare parts first.');const q=+val('bq')||1,c=val('bc')===''?+s.c:+val('bc');PB.items.push({id:s.id,n:s.n,q,c});dirty=1;render()};
 W.pr=i=>{PB.sup=val('bs');PB.items.splice(i,1);dirty=1;render()};
 W.ps=()=>run(async()=>{const sup=val('bs').trim();if(!sup||!PB.items.length)return alert('Enter the supplier and add items.');const total=PB.items.reduce((a,i)=>a+i.q*i.c,0),paid=Math.min(+val('bp')||0,total),w=writeBatch(db);
